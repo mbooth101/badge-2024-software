@@ -122,26 +122,6 @@ uint8_t st3m_gfx_pipe_available(void);
 // operation. wait_ms is waited for drawlits to clear.
 void st3m_gfx_flush(int wait_ms);
 
-typedef struct {
-    const char *title;
-    const char **lines;
-} st3m_gfx_textview_t;
-
-void st3m_gfx_show_textview(st3m_gfx_textview_t *tv);
-
-// Display some text as a splash message. This should be used early on in the
-// badge boot process to provide feedback on the rest of the software stack
-// coming up
-//
-// The splash screen is rendered the same way as if submitted by the normal
-// drawctx pipe, which means they will get overwritten the moment a proper
-// rendering loop starts.
-void st3m_gfx_splash(const char *text);
-
-// Draw the flow3r multi-coloured logo at coordinates x,y and with given
-// dimension (approx. bounding box size).
-void st3m_gfx_flow3r_logo(Ctx *ctx, float x, float y, float dim);
-
 // configure virtual viewport, the default values are 0, 0, 240, 240 which
 // also gives room for a copy of the fb for separate rasterize/blit in 16bpp
 //

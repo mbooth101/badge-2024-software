@@ -6,12 +6,6 @@
 
 bool gfx_inited = false;
 
-static mp_obj_t bsp_init() {
-    flow3r_bsp_display_init();
-    return MP_ROM_QSTR(MP_QSTR_sample);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(bsp_init_obj, bsp_init);
-
 static mp_obj_t gfx_init() {
     if (!gfx_inited) {
         st3m_gfx_init();
@@ -84,14 +78,6 @@ static mp_obj_t end_frame(mp_obj_t ctx) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(end_frame_obj, end_frame);
 
-static mp_obj_t splash() {
-    for (int i = 0; i < 5; i++) {
-        st3m_gfx_splash("");
-    }
-    return MP_ROM_QSTR(MP_QSTR_sample);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(splash_obj, splash);
-
 static mp_obj_t hexagon(size_t n_args, const mp_obj_t *args) {
     // Draw a regular hexagon in a context and return the context
     mp_ctx_obj_t *ctx = MP_OBJ_TO_PTR(args[0]);
@@ -140,8 +126,6 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR(hexagon_obj, 4, hexagon);
 static const mp_rom_map_elem_t display_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_display) },
     { MP_ROM_QSTR(MP_QSTR_gfx_init), MP_ROM_PTR(&gfx_init_obj) },
-    { MP_ROM_QSTR(MP_QSTR_bsp_init), MP_ROM_PTR(&bsp_init_obj) },
-    { MP_ROM_QSTR(MP_QSTR_splash), MP_ROM_PTR(&splash_obj) },
     { MP_ROM_QSTR(MP_QSTR_get_fps), MP_ROM_PTR(&get_fps_obj) },
     { MP_ROM_QSTR(MP_QSTR_get_ctx), MP_ROM_PTR(&get_ctx_obj) },
     { MP_ROM_QSTR(MP_QSTR_end_frame), MP_ROM_PTR(&end_frame_obj) },

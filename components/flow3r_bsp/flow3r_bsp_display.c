@@ -64,9 +64,3 @@ void flow3r_bsp_display_send_fb(void *fb_data, int bits) {
     flow3r_bsp_display_send_fb_osd(fb_data, bits, 1, NULL, 0, 0, 0, 0);
 }
 
-void flow3r_bsp_display_set_backlight(uint8_t percent) {
-    if (!gc9a01_initialized) {
-        return;
-    }
-    flow3r_bsp_gc9a01_backlight_set(&gc9a01, percent);
-}

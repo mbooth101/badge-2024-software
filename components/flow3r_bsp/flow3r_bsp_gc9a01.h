@@ -2,7 +2,6 @@
 
 #include <stdint.h>
 
-#include "driver/ledc.h"
 #include "driver/spi_master.h"
 
 // Configuration structure for display.
@@ -38,10 +37,6 @@ typedef struct {
     // Allocatged SPI device handle on configured bus.
     spi_device_handle_t spi;
 
-    // Only if using backlight.
-    ledc_channel_config_t bl_channel_config;
-    ledc_timer_config_t bl_timer_config;
-
 } flow3r_bsp_gc9a01_t;
 
 // Initialize display structure based on config, and then actually initialize
@@ -73,7 +68,3 @@ esp_err_t flow3r_bsp_gc9a01_blit_osd(flow3r_bsp_gc9a01_t *gc9a01,
                                      const void *fb, int bits, int scale,
                                      const void *osd_fb, int osd_x0, int osd_y0,
                                      int osd_x1, int osd_y1);
-
-// Set backlight for display, using integer percent value (0-100, clamped).
-esp_err_t flow3r_bsp_gc9a01_backlight_set(flow3r_bsp_gc9a01_t *gc9a01,
-                                          uint8_t value);

@@ -37,6 +37,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "driver/gpio.h"
+
 #include "flow3r_bsp_gc9a01.h"
 #include "sdkconfig.h"
 
@@ -397,27 +399,6 @@ static esp_err_t flow3r_bsp_gc9a01_row_set(flow3r_bsp_gc9a01_t *gc9a01,
     return flow3r_bsp_gc9a01_data_byte_sync(gc9a01, end & 0xFF);
 }
 
-esp_err_t flow3r_bsp_gc9a01_backlight_set(flow3r_bsp_gc9a01_t *gc9a01,
-                                          uint8_t value) {
-    if (gc9a01->config->backlight_used == 0) {
-        return ESP_OK;
-    }
-    if (value > 100) {
-        value = 100;
-    }
-
-    uint16_t max_duty = (1 << (int)gc9a01->bl_timer_config.duty_resolution) - 1;
-    uint16_t duty;
-    if (value >= 100) {
-        duty = max_duty;
-    } else {
-        duty = value * (max_duty / (float)100);
-    }
-
-    gc9a01->bl_channel_config.duty = duty;
-    return ledc_channel_config(&gc9a01->bl_channel_config);
-}
-
 esp_err_t flow3r_bsp_gc9a01_init(flow3r_bsp_gc9a01_t *gc9a01,
                                  flow3r_bsp_gc9a01_config_t *config) {
     memset(gc9a01, 0, sizeof(flow3r_bsp_gc9a01_t));
@@ -478,31 +459,6 @@ esp_err_t flow3r_bsp_gc9a01_init(flow3r_bsp_gc9a01_t *gc9a01,
     ret = spi_bus_add_device(gc9a01->config->host, &devcfg, &gc9a01->spi);
     if (ret != ESP_OK) {
         goto cleanup_spi_bus;
-    }
-
-    // Configure backlight timer/channel if used.
-    if (gc9a01->config->backlight_used) {
-        gc9a01->bl_timer_config.speed_mode = LEDC_LOW_SPEED_MODE;
-        gc9a01->bl_timer_config.duty_resolution = LEDC_TIMER_8_BIT;
-        gc9a01->bl_timer_config.timer_num = LEDC_TIMER_0;
-        gc9a01->bl_timer_config.freq_hz = 1000;
-        gc9a01->bl_timer_config.clk_cfg = LEDC_AUTO_CLK;
-        ret = ledc_timer_config(&gc9a01->bl_timer_config);
-        if (ret != ESP_OK) {
-            goto cleanup_spi_device;
-        }
-
-        gc9a01->bl_channel_config.gpio_num = gc9a01->config->pin_backlight;
-        gc9a01->bl_channel_config.speed_mode = LEDC_LOW_SPEED_MODE;
-        gc9a01->bl_channel_config.channel = LEDC_CHANNEL_0;
-        gc9a01->bl_channel_config.intr_type = LEDC_INTR_DISABLE;
-        gc9a01->bl_channel_config.timer_sel = LEDC_TIMER_0;
-        gc9a01->bl_channel_config.duty = 0;
-        gc9a01->bl_channel_config.hpoint = 0;
-        ret = ledc_channel_config(&gc9a01->bl_channel_config);
-        if (ret != ESP_OK) {
-            goto cleanup_spi_device;
-        }
     }
 
     // Issue reset if used.

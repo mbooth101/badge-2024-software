@@ -53,6 +53,10 @@ typedef struct {
 esp_err_t flow3r_bsp_gc9a01_init(flow3r_bsp_gc9a01_t *gc9a01,
                                  flow3r_bsp_gc9a01_config_t *config);
 
+// Shuts down the display described by the given gc9a01 structure. An error will
+// be returned if the SPI bus was not cleaned up successfully.
+esp_err_t flow3r_bsp_gc9a01_deinit(flow3r_bsp_gc9a01_t *gc9a01);
+
 // Send a full-sized framebuffer to the display using interrupts/DMA, blocking
 // FreeRTOS task until done.
 //

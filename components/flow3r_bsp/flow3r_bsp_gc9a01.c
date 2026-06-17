@@ -525,6 +525,18 @@ cleanup_spi_bus:
     return ret;
 }
 
+esp_err_t flow3r_bsp_gc9a01_deinit(flow3r_bsp_gc9a01_t *gc9a01) {
+    // Might fail if the device was already freed or was never added,
+    // but in those cases we don't care and can continue to free the bus
+    spi_bus_remove_device(gc9a01->spi);
+
+    esp_err_t ret = spi_bus_free(gc9a01->config->host);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "failed to free the spi bus on host %d", gc9a01->config->host);
+    }
+    return ret;
+}
+
 /* branchless 8bit add that maxes out at 255 */
 static inline uint8_t ctx_sadd8(uint8_t a, uint8_t b) {
     uint16_t s = (uint16_t)a + b;

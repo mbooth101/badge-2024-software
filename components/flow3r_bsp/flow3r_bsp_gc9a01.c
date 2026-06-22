@@ -71,11 +71,7 @@
 #define Cmd_GAMMA3 0xF2  // Set gamma 3
 #define Cmd_GAMMA4 0xF3  // Set gamma 4
 
-#define ColorMode_RGB_16bit 0x50
-#define ColorMode_RGB_18bit 0x60
-#define ColorMode_MCU_12bit 0x03
 #define ColorMode_MCU_16bit 0x05
-#define ColorMode_MCU_18bit 0x06
 
 #define MADCTL_MY 0x80
 #define MADCTL_MX 0x40
@@ -101,8 +97,6 @@ typedef struct {
 typedef struct {
     flow3r_bsp_gc9a01_t *gc9a01;
     const uint8_t *fb;
-    uint16_t *pal_16;
-    int bits;
     size_t left;
     size_t off;  // current pixel offset in blit
 
@@ -531,48 +525,7 @@ esp_err_t flow3r_bsp_gc9a01_deinit(flow3r_bsp_gc9a01_t *gc9a01) {
     return ret;
 }
 
-/* branchless 8bit add that maxes out at 255 */
-static inline uint8_t ctx_sadd8(uint8_t a, uint8_t b) {
-    uint16_t s = (uint16_t)a + b;
-    return -(s >> 8) | (uint8_t)s;
-}
-
 static EXT_RAM_BSS_ATTR uint16_t temp_blit[SPI_MAX_DMA_LEN / 2];
-
-static inline uint32_t ctx_565_unpack_32(const uint16_t pixel,
-                                         const int byteswap) {
-    uint16_t byteswapped;
-    if (byteswap) {
-        byteswapped = (pixel >> 8) | (pixel << 8);
-    } else {
-        byteswapped = pixel;
-    }
-    uint32_t b = (byteswapped & 31) << 3;
-    uint32_t g = ((byteswapped >> 5) & 63) << 2;
-    uint32_t r = ((byteswapped >> 11) & 31) << 3;
-
-    return r + (g << 8) + (b << 16) + (0xff << 24);
-}
-
-static inline uint16_t ctx_565_pack(uint8_t red, uint8_t green, uint8_t blue,
-                                    const int byteswap) {
-    uint32_t c = (red >> 3) << 11;
-    c |= (green >> 2) << 5;
-    c |= blue >> 3;
-    if (byteswap) {
-        return (c >> 8) | (c << 8);
-    } /* swap bytes */
-    return c;
-}
-
-#define U8_LERP(a, b, t) ((a) + ((((b) - (a)) * t + 256) >> 8))
-
-extern uint8_t st3m_pal[256 * 3];
-EXT_RAM_BSS_ATTR static uint16_t st3m_pal16[256];
-
-// https://pippin.gimp.org/a_dither/
-#define a_dither(x, y, divisor) \
-    ((((((x) + (y)*236) * 119) & 255) - 127) / divisor)
 
 static void flow3r_bsp_prep_blit(flow3r_bsp_gc9a01_blit_t *blit,
                                  int pix_count) {
@@ -582,72 +535,7 @@ static void flow3r_bsp_prep_blit(flow3r_bsp_gc9a01_blit_t *blit,
     unsigned int end_off = start_off + pix_count;
     unsigned int o = 0;
 
-            switch (blit->bits) {
-                case 16:
-                    blit->spi_tx.tx_buffer = &blit->fb[start_off * 2];
-                    break;
-                case 1:
-                    for (unsigned int i = start_off; i < end_off; i++)
-                        temp_blit[o++] =
-                            blit->pal_16[(fb[i / 8] >> ((i & 7))) & 0x1];
-                    break;
-                case 2:
-                    for (unsigned int i = start_off; i < end_off; i++)
-                        temp_blit[o++] =
-                            blit->pal_16[(fb[i / 4] >> ((i & 3) * 2)) & 0x3];
-                    break;
-                case 4:
-                    for (unsigned int i = start_off; i < end_off; i++) {
-                        temp_blit[o++] =
-                            blit->pal_16[(fb[i / 2] >> ((i & 1) * 4)) & 0xf];
-                    }
-                    break;
-                case 8:
-                case 9:
-                    for (unsigned int i = start_off; i < end_off; i++)
-                        temp_blit[o++] = blit->pal_16[fb[i]];
-                    break;
-                case 24:
-                    for (unsigned int i = start_off; i < end_off; i++)
-                        temp_blit[o++] = ctx_565_pack(
-                            fb[i * 3 + 0], fb[i * 3 + 1], fb[i * 3 + 2], 1);
-                    break;
-                case 32: {
-                    int x = start_off % 240;
-                    int y = start_off / 240;
-                    uint8_t *src = (uint8_t *)&fb[start_off * 4];
-                    for (unsigned int i = start_off; i < end_off; i++) {
-                        uint8_t rgba[4];
-                        {
-                            int val = src[0] + a_dither(x, y, 32);
-                            if (val < 0) val = 0;
-                            if (val > 255) val = 255;
-                            rgba[0] = val;
-                        }
-                        {
-                            int val = src[1] + a_dither(x, y, 16);
-                            if (val < 0) val = 0;
-                            if (val > 255) val = 255;
-                            rgba[1] = val;
-                        }
-                        {
-                            int val = src[2] + a_dither(x, y, 32);
-                            if (val < 0) val = 0;
-                            if (val > 255) val = 255;
-                            rgba[2] = val;
-                        }
-
-                        temp_blit[o++] =
-                            ctx_565_pack(rgba[0], rgba[1], rgba[2], 1);
-                        src += 4;
-                        x++;
-                        if (x == 240) {
-                            x = 0;
-                            y++;
-                        }
-                    }
-                } break;
-            }
+    blit->spi_tx.tx_buffer = &blit->fb[start_off * 2];
     blit->off += pix_count;
 }
 
@@ -686,20 +574,12 @@ static inline esp_err_t flow3r_bsp_gc9a01_blit_next(
 
 static esp_err_t flow3r_bsp_gc9a01_blit_start(flow3r_bsp_gc9a01_t *gc9a01,
                                               flow3r_bsp_gc9a01_blit_t *blit,
-                                              const uint16_t *fb, int bits) {
+                                              const uint16_t *fb) {
     memset(blit, 0, sizeof(flow3r_bsp_gc9a01_blit_t));
 
     blit->gc9a01 = gc9a01;
     blit->fb = (const uint8_t *)fb;
-    blit->bits = bits;
     blit->left = 2 * 240 * 240;  // left in native bytes (16bpp)
-    if (bits < 16) {
-        uint8_t *pal_24 = st3m_pal;
-        blit->pal_16 = st3m_pal16;
-        for (int i = 0; i < 256; i++)
-            blit->pal_16[i] = ctx_565_pack(pal_24[i * 3 + 0], pal_24[i * 3 + 1],
-                                           pal_24[i * 3 + 2], 1);
-    }
 
     return flow3r_bsp_gc9a01_cmd_sync(gc9a01, Cmd_RAMWR);
 }
@@ -722,7 +602,7 @@ esp_err_t flow3r_bsp_gc9a01_blit_osd(flow3r_bsp_gc9a01_t *gc9a01,
                                      int osd_x1, int osd_y1) {
     flow3r_bsp_gc9a01_blit_t blit;
     esp_err_t res = flow3r_bsp_gc9a01_blit_start(
-        gc9a01, &blit, fb, bits);
+        gc9a01, &blit, fb);
     if (res != ESP_OK) {
         return res;
     }

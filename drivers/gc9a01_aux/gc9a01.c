@@ -76,16 +76,6 @@
 #define MADCTL_BGR 0x08
 #define MADCTL_MH 0x04
 
-// Transaction 'user' structure as used by SPI transactions to the display.
-// Provides enough data for the pre-transaction callback to be able to set the
-// DC pin as needed.
-typedef struct {
-    flow3r_bsp_gc9a01_t *gc9a01;
-
-    // DC pin will be set to this in pre-SPI callback.
-    int dc;
-} flow3r_bsp_gc9a01_tx_t;
-
 // A full-framebuffer 'blit' operation descriptor. Keeps track of number of
 // underlying DMA SPI transactions left until blit is done.
 typedef struct {
@@ -94,7 +84,6 @@ typedef struct {
     size_t left;
     size_t off;  // current pixel offset in blit
 
-    flow3r_bsp_gc9a01_tx_t gc9a01_tx;
     spi_transaction_t spi_tx;
 } flow3r_bsp_gc9a01_blit_t;
 
@@ -170,14 +159,6 @@ static const flow3r_bsp_gc9a01_init_cmd_t flow3r_bsp_gc9a01_init_cmds[] = {
     { 0, { 0 }, 0xff },      // END
 };
 
-// This function is called (in irq context!) just before a transmission starts.
-// It will set the D/C line to the value indicated in the tx's dc field.
-static IRAM_ATTR void flow3r_bsp_gc9a01_pre_transfer_callback(
-    spi_transaction_t *t) {
-    flow3r_bsp_gc9a01_tx_t *tx = (flow3r_bsp_gc9a01_tx_t *)t->user;
-    gpio_set_level(tx->gc9a01->config->pin_dc, tx->dc);
-}
-
 /* Send a command to the LCD. Uses spi_device_polling_transmit, which waits
  * until the transfer is complete.
  *
@@ -192,15 +173,8 @@ static esp_err_t flow3r_bsp_gc9a01_cmd_sync(flow3r_bsp_gc9a01_t *gc9a01, uint8_t
     t.length = 8;
     t.tx_buffer = &cmd;
 
-    // As we're running a synchronous transaction, we can allocate the TX object
-    // on the stack, as this frame is guaranteed to be valid until the
-    // transaction completes.
-    flow3r_bsp_gc9a01_tx_t tx = {
-        .gc9a01 = gc9a01,
-        .dc = 0,
-    };
-
-    t.user = (void *)&tx;
+    // Low for commands
+    gpio_set_level(gc9a01->config->pin_dc, 0);
     esp_err_t res = spi_device_polling_transmit(gc9a01->spi, &t);
     return res;
 }
@@ -218,14 +192,9 @@ static esp_err_t flow3r_bsp_gc9a01_data_sync(flow3r_bsp_gc9a01_t *gc9a01,
         return ESP_OK;
     }
 
-    // As we're running a synchronous transaction, we can allocate the TX object
-    // on the stack, as this frame is guaranteed to be valid until the
-    // transaction completes.
-    flow3r_bsp_gc9a01_tx_t tx = {
-        .gc9a01 = gc9a01,
-        // DC == 1 for data.
-        .dc = 1,
-    };
+    // High for data
+    gpio_set_level(gc9a01->config->pin_dc, 1);
+
     /*
     On certain MC's the max SPI DMA transfer length might be smaller than the
     buffer. We then have to split the transmissions.
@@ -240,7 +209,6 @@ static esp_err_t flow3r_bsp_gc9a01_data_sync(flow3r_bsp_gc9a01_t *gc9a01,
         // Len is in bytes, transaction length is in bits.
         t.length = tx_len * 8;
         t.tx_buffer = data + offset;
-        t.user = (void *)&tx;
 
         // Transmit!
         esp_err_t ret = spi_device_polling_transmit(gc9a01->spi, &t);
@@ -416,7 +384,6 @@ esp_err_t gc9a01_init(flow3r_bsp_gc9a01_t *gc9a01,
         .mode = 0,
         .spics_io_num = gc9a01->config->pin_cs,
         .queue_size = 7,
-        .pre_cb = flow3r_bsp_gc9a01_pre_transfer_callback,
     };
 
     esp_err_t ret =
@@ -510,15 +477,13 @@ static inline esp_err_t gc9a01_blit_next(
     }
     unsigned int pix_count = size / 2;
 
-    blit->gc9a01_tx.gc9a01 = blit->gc9a01;
-    blit->gc9a01_tx.dc = 1;
+    gpio_set_level(blit->gc9a01->config->pin_dc, 1);
 
     // Memzero spi_tx as it gets written by the SPI driver after each
     // transaction.
     memset(&blit->spi_tx, 0, sizeof(spi_transaction_t));
     blit->spi_tx.length = pix_count * 16;
     blit->spi_tx.tx_buffer = temp_blit;
-    blit->spi_tx.user = &blit->gc9a01_tx;
     flow3r_bsp_prep_blit(blit, pix_count);
     blit->left -= size;
 

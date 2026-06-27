@@ -33,17 +33,12 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-
-#include "driver/gpio.h"
+#include "py/mphal.h"
 
 #include "gc9a01.h"
 
-#define Cmd_SLPIN 0x10
 #define Cmd_SLPOUT 0x11
 #define Cmd_INVON 0x21
-#define Cmd_DISPOFF 0x28
 #define Cmd_DISPON 0x29
 #define Cmd_CASET 0x2A
 #define Cmd_RASET 0x2B
@@ -143,6 +138,8 @@ static const flow3r_bsp_gc9a01_init_cmd_t flow3r_bsp_gc9a01_init_cmds[] = {
     { Cmd_MADCTL, { MADCTL_MX | MADCTL_MY | MADCTL_BGR }, 1 },  // Memory access control
     { Cmd_COLMOD, { 0x05 }, 1 },  // 16bit colour MCU interface
     { Cmd_INVON, { 0 }, 0 },  // Inversion mode
+    { Cmd_SLPOUT, { 0 }, 0x80 },
+    { Cmd_DISPON, { 0 }, 0x80 },
     { 0, { 0 }, 0xff },      // END
 };
 
@@ -161,7 +158,7 @@ static esp_err_t flow3r_bsp_gc9a01_cmd_sync(flow3r_bsp_gc9a01_t *gc9a01, uint8_t
     t.tx_buffer = &cmd;
 
     // Low for commands
-    gpio_set_level(gc9a01->config->pin_dc, 0);
+    mp_hal_pin_write(gc9a01->config->pin_dc, 0);
     esp_err_t res = spi_device_polling_transmit(gc9a01->spi, &t);
     return res;
 }
@@ -180,7 +177,7 @@ static esp_err_t flow3r_bsp_gc9a01_data_sync(flow3r_bsp_gc9a01_t *gc9a01,
     }
 
     // High for data
-    gpio_set_level(gc9a01->config->pin_dc, 1);
+    mp_hal_pin_write(gc9a01->config->pin_dc, 1);
 
     /*
     On certain MC's the max SPI DMA transfer length might be smaller than the
@@ -211,23 +208,6 @@ static esp_err_t flow3r_bsp_gc9a01_data_sync(flow3r_bsp_gc9a01_t *gc9a01,
 static esp_err_t flow3r_bsp_gc9a01_data_byte_sync(flow3r_bsp_gc9a01_t *gc9a01,
                                                   const uint8_t data) {
     return flow3r_bsp_gc9a01_data_sync(gc9a01, &data, 1);
-}
-
-static esp_err_t flow3r_bsp_gc9a01_sleep_mode_set(flow3r_bsp_gc9a01_t *gc9a01,
-                                                  uint8_t mode) {
-    if (mode)
-        return flow3r_bsp_gc9a01_cmd_sync(gc9a01, Cmd_SLPIN);
-    else
-        return flow3r_bsp_gc9a01_cmd_sync(gc9a01, Cmd_SLPOUT);
-    vTaskDelay(500 / portTICK_PERIOD_MS);
-}
-
-static esp_err_t flow3r_bsp_gc9a01_power_set(flow3r_bsp_gc9a01_t *gc9a01,
-                                             uint8_t mode) {
-    if (mode)
-        return flow3r_bsp_gc9a01_cmd_sync(gc9a01, Cmd_DISPON);
-    else
-        return flow3r_bsp_gc9a01_cmd_sync(gc9a01, Cmd_DISPOFF);
 }
 
 static esp_err_t flow3r_bsp_gc9a01_column_set(flow3r_bsp_gc9a01_t *gc9a01,
@@ -291,7 +271,7 @@ esp_err_t gc9a01_init(flow3r_bsp_gc9a01_t *gc9a01,
     if (res != ESP_OK) {
         return res;
     }
-    gpio_set_level(gc9a01->config->pin_dc, 0);
+    mp_hal_pin_write(gc9a01->config->pin_dc, 0);
 
     // Configure SPI bus.
     spi_bus_config_t buscfg = {
@@ -330,22 +310,10 @@ esp_err_t gc9a01_init(flow3r_bsp_gc9a01_t *gc9a01,
         flow3r_bsp_gc9a01_cmd_sync(gc9a01, cmd->cmd);
         flow3r_bsp_gc9a01_data_sync(gc9a01, cmd->data, cmd->databytes & 0x1F);
         if (cmd->databytes & 0x80) {
-            vTaskDelay(100 / portTICK_PERIOD_MS);
+            mp_hal_delay_ms(150);
         }
         ix++;
     }
-
-    ret = flow3r_bsp_gc9a01_sleep_mode_set(gc9a01, 0);
-    if (ret != ESP_OK) {
-        goto cleanup_spi_device;
-    }
-    vTaskDelay(120 / portTICK_PERIOD_MS);
-
-    ret = flow3r_bsp_gc9a01_power_set(gc9a01, 1);
-    if (ret != ESP_OK) {
-        goto cleanup_spi_device;
-    }
-    vTaskDelay(20 / portTICK_PERIOD_MS);
 
     // We always write the entire framebuffer at once.
     ret = flow3r_bsp_gc9a01_column_set(gc9a01, 0, 239);

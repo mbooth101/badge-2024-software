@@ -81,10 +81,8 @@
 typedef struct {
     flow3r_bsp_gc9a01_t *gc9a01;
     const uint8_t *fb;
-    size_t left;
+    size_t left; // bytes left to blit
     size_t off;  // current pixel offset in blit
-
-    spi_transaction_t spi_tx;
 } flow3r_bsp_gc9a01_blit_t;
 
 /*
@@ -461,53 +459,27 @@ esp_err_t gc9a01_deinit(flow3r_bsp_gc9a01_t *gc9a01) {
     return spi_bus_free(gc9a01->config->host);
 }
 
-static EXT_RAM_BSS_ATTR uint16_t temp_blit[SPI_MAX_DMA_LEN / 2];
-
-static void flow3r_bsp_prep_blit(flow3r_bsp_gc9a01_blit_t *blit,
-                                 int pix_count) {
-    blit->spi_tx.tx_buffer = &blit->fb[blit->off * 2];
-    blit->off += pix_count;
-}
-
 static inline esp_err_t gc9a01_blit_next(
     flow3r_bsp_gc9a01_blit_t *blit) {
     size_t size = blit->left;
     if (size > SPI_MAX_DMA_LEN) {
         size = SPI_MAX_DMA_LEN;
     }
-    unsigned int pix_count = size / 2;
-
-    gpio_set_level(blit->gc9a01->config->pin_dc, 1);
-
-    // Memzero spi_tx as it gets written by the SPI driver after each
-    // transaction.
-    memset(&blit->spi_tx, 0, sizeof(spi_transaction_t));
-    blit->spi_tx.length = pix_count * 16;
-    blit->spi_tx.tx_buffer = temp_blit;
-    flow3r_bsp_prep_blit(blit, pix_count);
+    const uint8_t *buffer = &blit->fb[blit->off * 2];
+    blit->off += size / 2;
     blit->left -= size;
-
-    return spi_device_queue_trans(blit->gc9a01->spi, &blit->spi_tx, portMAX_DELAY);
+    return flow3r_bsp_gc9a01_data_sync(blit->gc9a01, buffer, size);
 }
 
 static esp_err_t gc9a01_blit_start(flow3r_bsp_gc9a01_t *gc9a01,
                                               flow3r_bsp_gc9a01_blit_t *blit,
                                               const uint16_t *fb) {
     memset(blit, 0, sizeof(flow3r_bsp_gc9a01_blit_t));
-
     blit->gc9a01 = gc9a01;
     blit->fb = (const uint8_t *)fb;
     blit->left = 2 * 240 * 240;  // left in native bytes (16bpp)
 
     return flow3r_bsp_gc9a01_cmd_sync(gc9a01, Cmd_RAMWR);
-}
-
-static esp_err_t gc9a01_blit_wait_done(
-    flow3r_bsp_gc9a01_blit_t *blit, TickType_t ticks_to_wait) {
-    spi_transaction_t *tx_done;
-    esp_err_t ret =
-        spi_device_get_trans_result(blit->gc9a01->spi, &tx_done, ticks_to_wait);
-    return ret;
 }
 
 esp_err_t gc9a01_blit(flow3r_bsp_gc9a01_t *gc9a01, const void *fb) {
@@ -520,10 +492,6 @@ esp_err_t gc9a01_blit(flow3r_bsp_gc9a01_t *gc9a01, const void *fb) {
 
     while (blit.left != 0) {
         res = gc9a01_blit_next(&blit);
-        if (res != ESP_OK) {
-            return res;
-        }
-        res = gc9a01_blit_wait_done(&blit, portMAX_DELAY);
         if (res != ESP_OK) {
             return res;
         }

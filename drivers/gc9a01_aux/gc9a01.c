@@ -42,13 +42,12 @@
 
 #define Cmd_SLPIN 0x10
 #define Cmd_SLPOUT 0x11
-#define Cmd_INVOFF 0x20
 #define Cmd_INVON 0x21
 #define Cmd_DISPOFF 0x28
 #define Cmd_DISPON 0x29
 #define Cmd_CASET 0x2A
 #define Cmd_RASET 0x2B
-#define Cmd_RAMWR 0x2C
+#define Cmd_RAMWR 0x2C   // Frame memory write
 #define Cmd_TEON 0x35    // Tearing effect line ON
 #define Cmd_MADCTL 0x36  // Memory data access control
 #define Cmd_COLMOD 0x3A  // Pixel format set
@@ -58,7 +57,6 @@
 #define Cmd_PWCTR2 0xC3  // Power control 2
 #define Cmd_PWCTR3 0xC4  // Power control 3
 #define Cmd_PWCTR4 0xC9  // Power control 4
-#define Cmd_PWCTR7 0xA7  // Power control 7
 
 #define Cmd_FRAMERATE 0xE8
 
@@ -67,14 +65,9 @@
 #define Cmd_GAMMA3 0xF2  // Set gamma 3
 #define Cmd_GAMMA4 0xF3  // Set gamma 4
 
-#define ColorMode_MCU_16bit 0x05
-
 #define MADCTL_MY 0x80
 #define MADCTL_MX 0x40
-#define MADCTL_MV 0x20
-#define MADCTL_ML 0x10
 #define MADCTL_BGR 0x08
-#define MADCTL_MH 0x04
 
 // A full-framebuffer 'blit' operation descriptor. Keeps track of number of
 // underlying DMA SPI transactions left until blit is done.
@@ -115,8 +108,7 @@ static const flow3r_bsp_gc9a01_init_cmd_t flow3r_bsp_gc9a01_init_cmds[] = {
     { 0x8e, { 0xff }, 1 },
     { 0x8f, { 0xff }, 1 },
     { Cmd_DisplayFunctionControl,
-      { 0x00, 0x20 },
-      2 },  // Scan direction S360 -> S1
+      { 0x00, 0x20 }, 2 },  // Scan direction S360 -> S1
     { 0x90, { 0x08, 0x08, 0x08, 0x08 }, 4 },
     { 0xbd, { 0x06 }, 1 },
     { 0xbc, { 0x00 }, 1 },
@@ -137,23 +129,20 @@ static const flow3r_bsp_gc9a01_init_cmd_t flow3r_bsp_gc9a01_init_cmds[] = {
     { 0x70, { 0x07, 0x07, 0x04, 0x0e, 0x0f, 0x09, 0x07, 0x08, 0x03 }, 9 },
     { Cmd_FRAMERATE, { 0x34 }, 1 },  // 4 dot inversion
     { 0x62,
-      { 0x18, 0x0D, 0x71, 0xED, 0x70, 0x70, 0x18, 0x0F, 0x71, 0xEF, 0x70,
-        0x70 },
+      { 0x18, 0x0D, 0x71, 0xED, 0x70, 0x70, 0x18, 0x0F, 0x71, 0xEF, 0x70, 0x70 },
       12 },
     { 0x63,
-      { 0x18, 0x11, 0x71, 0xF1, 0x70, 0x70, 0x18, 0x13, 0x71, 0xF3, 0x70,
-        0x70 },
+      { 0x18, 0x11, 0x71, 0xF1, 0x70, 0x70, 0x18, 0x13, 0x71, 0xF3, 0x70, 0x70 },
       12 },
     { 0x64, { 0x28, 0x29, 0xF1, 0x01, 0xF1, 0x00, 0x07 }, 7 },
-    { 0x66,
-      { 0x3C, 0x00, 0xCD, 0x67, 0x45, 0x45, 0x10, 0x00, 0x00, 0x00 },
-      10 },
-    { 0x67,
-      { 0x00, 0x3C, 0x00, 0x00, 0x00, 0x01, 0x54, 0x10, 0x32, 0x98 },
-      10 },
+    { 0x66, { 0x3C, 0x00, 0xCD, 0x67, 0x45, 0x45, 0x10, 0x00, 0x00, 0x00 }, 10 },
+    { 0x67, { 0x00, 0x3C, 0x00, 0x00, 0x00, 0x01, 0x54, 0x10, 0x32, 0x98 }, 10 },
     { 0x74, { 0x10, 0x85, 0x80, 0x00, 0x00, 0x4E, 0x00 }, 7 },
     { 0x98, { 0x3e, 0x07 }, 2 },
-    { Cmd_TEON, { 0 }, 0 },  // Tearing effect line on
+    { Cmd_TEON, { 0 }, 0 },  // Tearing effect line
+    { Cmd_MADCTL, { MADCTL_MX | MADCTL_MY | MADCTL_BGR }, 1 },  // Memory access control
+    { Cmd_COLMOD, { 0x05 }, 1 },  // 16bit colour MCU interface
+    { Cmd_INVON, { 0 }, 0 },  // Inversion mode
     { 0, { 0 }, 0xff },      // END
 };
 
@@ -222,68 +211,6 @@ static esp_err_t flow3r_bsp_gc9a01_data_sync(flow3r_bsp_gc9a01_t *gc9a01,
 static esp_err_t flow3r_bsp_gc9a01_data_byte_sync(flow3r_bsp_gc9a01_t *gc9a01,
                                                   const uint8_t data) {
     return flow3r_bsp_gc9a01_data_sync(gc9a01, &data, 1);
-}
-
-static esp_err_t flow3r_bsp_gc9a01_mem_access_mode_set(
-    flow3r_bsp_gc9a01_t *gc9a01, uint8_t rotation, uint8_t vert_mirror,
-    uint8_t horiz_mirror, uint8_t is_bgr) {
-    uint8_t val = 0;
-    rotation &= 7;
-
-    switch (rotation) {
-        case 0:
-            val = 0;
-            break;
-        case 1:
-            val = MADCTL_MX;
-            break;
-        case 2:
-            val = MADCTL_MY;
-            break;
-        case 3:
-            val = MADCTL_MX | MADCTL_MY;
-            break;
-        case 4:
-            val = MADCTL_MV;
-            break;
-        case 5:
-            val = MADCTL_MV | MADCTL_MX;
-            break;
-        case 6:
-            val = MADCTL_MV | MADCTL_MY;
-            break;
-        case 7:
-            val = MADCTL_MV | MADCTL_MX | MADCTL_MY;
-            break;
-    }
-
-    if (vert_mirror) val = MADCTL_ML;
-    if (horiz_mirror) val = MADCTL_MH;
-
-    if (is_bgr) val |= MADCTL_BGR;
-
-    esp_err_t ret = flow3r_bsp_gc9a01_cmd_sync(gc9a01, Cmd_MADCTL);
-    if (ret != ESP_OK) {
-        return ret;
-    }
-    return flow3r_bsp_gc9a01_data_byte_sync(gc9a01, val);
-}
-
-static esp_err_t flow3r_bsp_gc9a01_color_mode_set(flow3r_bsp_gc9a01_t *gc9a01,
-                                                  uint8_t color_mode) {
-    esp_err_t ret = flow3r_bsp_gc9a01_cmd_sync(gc9a01, Cmd_COLMOD);
-    if (ret != ESP_OK) {
-        return ret;
-    }
-    return flow3r_bsp_gc9a01_data_byte_sync(gc9a01, color_mode & 0x77);
-}
-
-static esp_err_t flow3r_bsp_gc9a01_inversion_mode_set(
-    flow3r_bsp_gc9a01_t *gc9a01, uint8_t mode) {
-    if (mode)
-        return flow3r_bsp_gc9a01_cmd_sync(gc9a01, Cmd_INVON);
-    else
-        return flow3r_bsp_gc9a01_cmd_sync(gc9a01, Cmd_INVOFF);
 }
 
 static esp_err_t flow3r_bsp_gc9a01_sleep_mode_set(flow3r_bsp_gc9a01_t *gc9a01,
@@ -408,18 +335,6 @@ esp_err_t gc9a01_init(flow3r_bsp_gc9a01_t *gc9a01,
         ix++;
     }
 
-    ret = flow3r_bsp_gc9a01_mem_access_mode_set(gc9a01, 3, 0, 0, 1);
-    if (ret != ESP_OK) {
-        goto cleanup_spi_device;
-    }
-    ret = flow3r_bsp_gc9a01_color_mode_set(gc9a01, ColorMode_MCU_16bit);
-    if (ret != ESP_OK) {
-        goto cleanup_spi_device;
-    }
-    ret = flow3r_bsp_gc9a01_inversion_mode_set(gc9a01, 1);
-    if (ret != ESP_OK) {
-        goto cleanup_spi_device;
-    }
     ret = flow3r_bsp_gc9a01_sleep_mode_set(gc9a01, 0);
     if (ret != ESP_OK) {
         goto cleanup_spi_device;
